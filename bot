@@ -1,0 +1,57 @@
+import openpyxl
+from telebot import TeleBot
+import telebot
+from telebot import types
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters import Command
+import openpyxl
+
+
+# Вместо BOT TOKEN HERE нужно вставить токен вашего бота, полученный у @BotFather
+bot = telebot.TeleBot('8088224991:AAETn6CSJAXflTOlyQ2wqGxadmxWRyJsGjc')
+#dp = Dispatcher()
+s=[""]
+selected_exams=s
+class ProfileSelection(StatesGroup):
+    select_exams = State()
+    select_profile = State()
+workbook = openpyxl.load_workbook("/Users/kristina/Desktop/SATVocabularyBot/Бот в ТГ Приемка_к ТЗ.xlsx")
+ege_program_sheet = workbook["ЕГЭ программа"]
+
+
+markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+btn1 = types.KeyboardButton("Математика")
+btn2 = types.KeyboardButton('Информатика')
+btn3 = types.KeyboardButton('Биология')
+btn4 = types.KeyboardButton('Обществознание')
+btn5 = types.KeyboardButton('История')
+btn6 = types.KeyboardButton('Литература')
+btn7 = types.KeyboardButton('Химия')
+btn8 = types.KeyboardButton('География')
+btn9 = types.KeyboardButton('Иностранный язык')
+btn10 = types.KeyboardButton('Физика')
+markup.add(btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8, btn9, btn10)
+
+
+
+@bot.message_handler(commands = ['start'])
+def start(message):
+    bot.send_message(message.from_user.id,'Выбери ЕГЭ, которые ты планируешь сдавать. Русский язык, как третий экзамен мы уже выбрали за тебя. Если сдаешь больше двух (не считая русского языка), выбери 2, по которым у тебя скорее будут высокие баллы',reply_markup=markup)
+
+@bot.message_handler(content_types=['text'])
+def choice(message):
+    selected_exams = message.text.split(" ")
+    s.append(selected_exams)
+    if len(s) == 1:
+        bot.send_message(message.chat.id,len(s))    
+    elif len(s)==2 :
+        #exam_prov(message)
+        bot.send_message(message.chat.id,s)  
+    else:
+       bot.send_message(message.chat.id,s)             
+    return s 
+
+
+
+bot.polling(none_stop=True, interval=0)
