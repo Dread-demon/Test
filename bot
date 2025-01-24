@@ -1,57 +1,190 @@
 import openpyxl
-from telebot import TeleBot
+from telebot import TeleBot, types
 import telebot
-from telebot import types
-from aiogram import Bot, Dispatcher
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.filters import Command
-import openpyxl
 
+# Токен бота
+bot = TeleBot('')  # Укажите действительный токен
 
-# Вместо BOT TOKEN HERE нужно вставить токен вашего бота, полученный у @BotFather
-bot = telebot.TeleBot('8088224991:AAETn6CSJAXflTOlyQ2wqGxadmxWRyJsGjc')
-#dp = Dispatcher()
-s=[""]
-selected_exams=s
-class ProfileSelection(StatesGroup):
-    select_exams = State()
-    select_profile = State()
-workbook = openpyxl.load_workbook("/Users/kristina/Desktop/SATVocabularyBot/Бот в ТГ Приемка_к ТЗ.xlsx")
-ege_program_sheet = workbook["ЕГЭ программа"]
+# Хранилище данных пользователя
+user_data = {}  # Сохраняем выбранные экзамены
+profiles_data = {}  # Сохраняем найденные профили
+vneuchebka_data = []  # Данные для внеучебки
 
+# Загрузка Excel файла
+try:
+    workbook = openpyxl.load_workbook("")
+    ege_program_sheet = workbook["ЕГЭ программа"]
+    vneuchebka_sheet = workbook["Внеучебка"]
+except Exception as e:
+    print(f"Ошибка при загрузке Excel файла: {e}")
+    exit()
 
+# Загрузка данных из вкладки "Внеучебка"
+for row in vneuchebka_sheet.iter_rows(min_row=2, values_only=True):
+    if row[0] and row[1] and row[2]:
+        vneuchebka_data.append({
+            "number": str(row[0]),
+            "question": row[1],
+            "description": row[2]
+        })
+
+# Кнопки для выбора ЕГЭ
+buttons = [
+    "Математика", "Информатика", "Биология", "Обществознание", "История",
+    "Литература", "Химия", "География", "Иностранный язык", "Физика"
+]
 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-btn1 = types.KeyboardButton("Математика")
-btn2 = types.KeyboardButton('Информатика')
-btn3 = types.KeyboardButton('Биология')
-btn4 = types.KeyboardButton('Обществознание')
-btn5 = types.KeyboardButton('История')
-btn6 = types.KeyboardButton('Литература')
-btn7 = types.KeyboardButton('Химия')
-btn8 = types.KeyboardButton('География')
-btn9 = types.KeyboardButton('Иностранный язык')
-btn10 = types.KeyboardButton('Физика')
-markup.add(btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8, btn9, btn10)
+markup.add(*[types.KeyboardButton(btn) for btn in buttons])
 
 
-
-@bot.message_handler(commands = ['start'])
+@bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.from_user.id,'Выбери ЕГЭ, которые ты планируешь сдавать. Русский язык, как третий экзамен мы уже выбрали за тебя. Если сдаешь больше двух (не считая русского языка), выбери 2, по которым у тебя скорее будут высокие баллы',reply_markup=markup)
+    """Начало работы бота."""
+    chat_id = message.chat.id
+    user_data[chat_id] = []  # Сброс данных пользователя
+    profiles_data[chat_id] = []  # Сброс профилей
+    bot.send_message(
+        chat_id,
+        "Выбери ЕГЭ, которые ты планируешь сдавать. Русский язык, как третий экзамен, мы уже выбрали за тебя. "
+        "Если сдаешь больше двух (не считая русского языка), выбери 2, по которым у тебя скорее будут высокие баллы.",
+        reply_markup=markup
+    )
+
 
 @bot.message_handler(content_types=['text'])
-def choice(message):
-    selected_exams = message.text.split(" ")
-    s.append(selected_exams)
-    if len(s) == 1:
-        bot.send_message(message.chat.id,len(s))    
-    elif len(s)==2 :
-        #exam_prov(message)
-        bot.send_message(message.chat.id,s)  
+def handle_text(message):
+    """Обработка текстовых сообщений."""
+    chat_id = message.chat.id
+    text = message.text
+
+    # Если пользователь выбирает ЕГЭ
+    if chat_id not in profiles_data or not profiles_data[chat_id]:
+        exam_handler(message)
+    # Если пользователь выбирает профиль
+    elif text.isdigit():
+        profile_handler(message)
+    elif text.lower() == "другие варианты":
+        bot.send_message(chat_id, "Функция 'Другие варианты' пока не реализована.")
+    elif text.lower() == "продолжить":
+        handle_vneuchebka(message)
+    elif text.lower() == "вернуться в начало":
+        start(message)
     else:
-       bot.send_message(message.chat.id,s)             
-    return s 
+        bot.send_message(chat_id, "Пожалуйста, выберите экзамены или номер профиля из списка.")
+
+
+def exam_handler(message):
+    """Обработка выбора экзаменов."""
+    chat_id = message.chat.id
+    exams = user_data.get(chat_id, [])
+    if len(exams) < 2:
+        if message.text in buttons and message.text not in exams:
+            exams.append(message.text)
+            user_data[chat_id] = exams
+            bot.send_message(chat_id, f"Вы выбрали: {', '.join(exams)}.")
+        else:
+            bot.send_message(chat_id, "Выберите другой экзамен.")
+        if len(exams) == 2:
+            check_exams(message, exams)
+    else:
+        bot.send_message(chat_id, "Вы уже выбрали 2 экзамена. Для сброса введите /start.")
+
+
+def check_exams(message, exams):
+    """Проверка подходящих профилей под выбранные экзамены."""
+    valid_profiles = []
+    for row in ege_program_sheet.iter_rows(min_row=2, values_only=True):
+        if row[2]:  # Проверяем, что столбец с комбинацией не пуст
+            combination = row[2].split(";")  # Разделяем по ";"
+            combination = [exam.strip() for exam in combination]  # Убираем пробелы
+            if set(exams) == set(combination):  # Сравниваем как множества
+                valid_profiles.append(row)
+
+    if valid_profiles:
+        # Сохраняем профили в глобальном словаре
+        profiles_data[message.chat.id] = valid_profiles
+
+        # Создаем клавиатуру
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        for i, profile in enumerate(valid_profiles, start=1):
+            keyboard.add(types.KeyboardButton(f"{i}"))  # Кнопка с номером профиля
+
+        # Отправляем список профилей
+        profile_list = "\n".join([f"{i}. {profile[3]}" for i, profile in enumerate(valid_profiles, start=1)])
+        bot.send_message(
+            message.chat.id,
+            f"Мы нашли {len(valid_profiles)} профилей, подходящих под ваш выбор ЕГЭ:\n\n{profile_list}\n\n"
+            "Выберите номер профиля из списка, чтобы узнать подробнее.",
+            reply_markup=keyboard
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            "Ой, мы не нашли профиля с таким набором ЕГЭ. Давай попробуем выбрать другие?"
+        )
+        user_data[message.chat.id] = []  # Сбрасываем выбор экзаменов
 
 
 
-bot.polling(none_stop=True, interval=0)
+def list_profiles(message, profiles):
+    """Вывод списка профилей для выбора."""
+    chat_id = message.chat.id
+    profile_list = "\n".join([f"{i + 1}. {profile[3]}" for i, profile in enumerate(profiles)])
+    bot.send_message(
+        chat_id,
+        f"Отлично, в ЯрГУ им. П.Г. Демидова с этими экзаменами ты можешь обучаться на следующих профилях:\n\n{profile_list}\n\n"
+        "Давай выберем, какой профиль тебе ближе? Введи номер пункта, который тебе ближе."
+    )
+
+
+def profile_handler(message):
+    """Обработка выбора профиля по номеру."""
+    chat_id = message.chat.id
+    profiles = profiles_data.get(chat_id, [])
+
+    if not profiles:
+        bot.send_message(chat_id, "Не найдено доступных профилей. Начните заново с команды /start.")
+        return
+
+    try:
+        profile_index = int(message.text) - 1
+        if 0 <= profile_index < len(profiles):
+            send_profile_info(message, profiles[profile_index])
+        else:
+            bot.send_message(chat_id, "Неверный номер профиля. Попробуйте еще раз.")
+    except ValueError:
+        bot.send_message(chat_id, "Пожалуйста, введите номер профиля.")
+
+
+def send_profile_info(message, profile):
+    """Отправка информации о выбранном профиле."""
+    profile_name, faculty, pass_score, budget, non_budget, job, link = profile[3:]
+    bot.send_message(
+        message.chat.id,
+        f"С этим набором ЕГЭ тебе будет интересно обучаться на профиле: *{profile_name}*\n\n"
+        f"Факультет: {faculty}\n"
+        f"Проходной балл 2024 года: {pass_score}\n"
+        f"Бюджетных мест в 2025 году: {budget}\n"
+        f"Внебюджетных мест и стоимость обучения: {non_budget}\n"
+        f"Кем работать после обучения: {job}\n"
+        f"Полный список профилей: https://vk.cc/cHt9Bx\n"
+        f"Проходные баллы и стоимость: https://vk.cc/cHt9Az",
+        parse_mode="Markdown"
+    )
+
+
+def handle_vneuchebka(message):
+    """Обработка выбора внеучебной деятельности."""
+    chat_id = message.chat.id
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for item in vneuchebka_data:
+        keyboard.add(types.KeyboardButton(item["number"]))
+    response = "Теперь давай выясним, что помимо обучения тебе интересно? Введи номер ответным сообщением:\n"
+    for item in vneuchebka_data:
+        response += f"{item['number']}. {item['question']}\n"
+    bot.send_message(chat_id, response, reply_markup=keyboard)
+
+
+# Запуск бота
+bot.polling(none_stop=True)
+
